@@ -23,6 +23,7 @@ const mutateFS = require('mutate-fs')
 const eos = require('end-of-stream')
 const requireInject = require('./utils/require-inject.js')
 const isWindows = process.platform === 'win32'
+const ReadEntry = require('../lib/read-entry.js')
 
 t.teardown(_ => rimraf.sync(unpackdir))
 
@@ -2697,4 +2698,66 @@ t.test('dircache prune all on windows when symlink encountered', t => {
   })
 
   t.end()
+})
+
+t.test('excessively deep subfolder nesting', t => {
+  const tf = path.resolve(fixtures, 'excessively-deep.tar')
+  const data = fs.readFileSync(tf)
+  const warnings = []
+  const onwarn = (c, w, data) =>
+    warnings.push([c, w, data])
+
+  const check = (t, maxDepth = 1024) => {
+    t.match(warnings, [
+      ['TAR_ENTRY_ERROR',
+        'path excessively deep',
+        {
+          entry: ReadEntry,
+          path: /^\.(\/a){1024,}\/foo.txt$/,
+          depth: 222372,
+          maxDepth,
+        }
+      ]
+    ])
+    warnings.length = 0
+    t.end()
+  }
+
+  t.test('async', t => {
+    const cwd = testdir()
+    new Unpack({
+      cwd,
+      onwarn
+    }).on('end', () => check(t)).end(data)
+  })
+
+  t.test('sync', t => {
+    const cwd = testdir()
+    new UnpackSync({
+      cwd,
+      onwarn
+    }).end(data)
+    check(t)
+  })
+
+  t.test('async set md', t => {
+    const cwd = testdir()
+    new Unpack({
+      cwd,
+      onwarn,
+      maxDepth: 64,
+    }).on('end', () => check(t, 64)).end(data)
+  })
+
+  t.test('sync set md', t => {
+    const cwd = testdir()
+    new UnpackSync({
+      cwd,
+      onwarn,
+      maxDepth: 64,
+    }).end(data)
+    check(t, 64)
+  })
+
+  t.end();
 })
